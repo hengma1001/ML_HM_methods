@@ -52,15 +52,15 @@ class conv_variational_autoencoder(object):
     def __init__(self, image_size, input_channel, 
                 num_conv_layers, feature_map_list, filter_shape_list, stride_list, 
                 num_dense_layers, dense_neuron_list, dense_dropout_list, latent_dim,
-                activation_func='relu',
-                eps_mean=0.0,eps_std=1.0):   
+                activation_func='relu', eps_mean=0.0,eps_std=1.0, log_interval = 100): 
+        self.log_interval = log_interval
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
         self.model = CVAE_model(image_size, input_channel, 
                           num_conv_layers, feature_map_list, filter_shape_list, stride_list, 
                           num_dense_layers, dense_neuron_list, dense_dropout_list, latent_dim, 
                           activation_func='relu', eps_mean=0.0,eps_std=1.0).to(self.device)
 #         self.optimizer = optim.RMSprop(self.model.parameters(), lr=0.001, alpha=0.9, eps=1e-08, weight_decay=1e-6)
-        self.optimizer = optim.Adam(self.model.parameters(), lr=1e-3)
+        self.optimizer = optim.Adam(self.model.parameters(), lr=1e-3, weight_decay=1e-5)
 #         self.optimizer = optim.Adadelta(self.model.parameters(), lr=1e-1)
         self.loss_func = nn.BCELoss(reduction='sum') 
         
@@ -85,15 +85,17 @@ class conv_variational_autoencoder(object):
         # see Appendix B from VAE paper:
         # Kingma and Welling. Auto-Encoding Variational Bayes. ICLR, 2014
         # https://arxiv.org/abs/1312.6114
-        # 0.5 * sum(1 + log(sigma^2) - mu^2 - sigma^2)
+        # -0.5 * sum(1 + log(sigma^2) - mu^2 - sigma^2) 
+#         l_loss = - 0.5 * K.mean(1 + self.z_log_var - K.square(self.z_mean) 
+#                   - K.exp(self.z_log_var), axis=-1);
         KLD = -0.5 * torch.sum(1 + logvar - mu.pow(2) - logvar.exp()) 
         return BCE + KLD 
     
     def train(self, train_loader, epoch):
         self.model.train()
         train_loss = 0
-        for batch_idx, (data, _) in enumerate(train_loader):
-            data = data.to(self.device)
+        for batch_idx, data in enumerate(train_loader):
+            data = data.to(self.device, dtype=torch.float)
             self.optimizer.zero_grad()
             recon_batch, mu, logvar = self.model(data)
     #         print(recon_batch.shape, data.shape)
@@ -101,20 +103,21 @@ class conv_variational_autoencoder(object):
             loss.backward()
             train_loss += loss.item()
             self.optimizer.step()
-#             if batch_idx % log_interval == 0:
-#                 print('Train Epoch: {} [{}/{} ({:.0f}%)]\tLoss: {:.6f}'.format(
-#                     epoch, batch_idx * len(data), len(train_loader.dataset),
-#                     100. * batch_idx / len(train_loader),
-#                     loss.item() / len(data)))
-        print '====> Epoch: {} Average loss: {:.4f}'.format(epoch, train_loss / len(train_loader.dataset)),
+            if batch_idx % self.log_interval == 0:
+                print 'Train Epoch: {} [{}/{} ({:.0f}%)]\tLoss: {:.6f}'.format(
+                    epoch, batch_idx * len(data), len(train_loader.dataset),
+                    100. * batch_idx / len(train_loader),
+                    loss.item() / len(data)) 
+        print '====> Epoch: {} Average loss: {:.4f}'.format(epoch, train_loss / len(train_loader.dataset)), 
+        return train_loss / len(train_loader.dataset) 
     
         
     def test(self, test_loader, epoch):
         self.model.train()
         test_loss = 0 
         with torch.no_grad():
-            for i, (data, _) in enumerate(test_loader):
-                data = data.to(self.device) 
+            for i, data in enumerate(test_loader):
+                data = data.to(self.device, dtype=torch.float) 
                 recon_batch, mu, logvar = self.model(data)
                 test_loss += self.loss(recon_batch, data, mu, logvar).item()
 #                 if i == 0:
@@ -125,7 +128,8 @@ class conv_variational_autoencoder(object):
 #                              'results/reconstruction_' + str(epoch) + '.png', nrow=n)
 
         test_loss /= len(test_loader.dataset)
-        print('====> Test set loss: {:.4f}'.format(test_loss))
+        print('====> Test set loss: {:.4f}'.format(test_loss)) 
+        return test_loss
         
 
 class CVAE_model(nn.Module):
@@ -263,7 +267,7 @@ class CVAE_model(nn.Module):
         for dense_layer, dropput_layer in zip(self.encode_dense_layers, self.encode_dropout_layers): 
             x = F.relu(dense_layer(dropput_layer(x)))      
         mu = self.latent_mu(x) 
-        logvar = self.latent_logvar(x)
+        logvar = self.latent_logvar(x) 
         return mu, logvar 
     
     def reparameterize(self, mu, logvar): 

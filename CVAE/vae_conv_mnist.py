@@ -85,17 +85,15 @@ class conv_variational_autoencoder(object):
         # see Appendix B from VAE paper:
         # Kingma and Welling. Auto-Encoding Variational Bayes. ICLR, 2014
         # https://arxiv.org/abs/1312.6114
-        # -0.5 * sum(1 + log(sigma^2) - mu^2 - sigma^2) 
-#         l_loss = - 0.5 * K.mean(1 + self.z_log_var - K.square(self.z_mean) 
-#                   - K.exp(self.z_log_var), axis=-1);
+        # 0.5 * sum(1 + log(sigma^2) - mu^2 - sigma^2)
         KLD = -0.5 * torch.sum(1 + logvar - mu.pow(2) - logvar.exp()) 
         return BCE + KLD 
     
     def train(self, train_loader, epoch):
         self.model.train()
         train_loss = 0
-        for batch_idx, data in enumerate(train_loader):
-            data = data.to(self.device, dtype=torch.float)
+        for batch_idx, (data, _) in enumerate(train_loader):
+            data = data.to(self.device)
             self.optimizer.zero_grad()
             recon_batch, mu, logvar = self.model(data)
     #         print(recon_batch.shape, data.shape)
@@ -108,16 +106,15 @@ class conv_variational_autoencoder(object):
                     epoch, batch_idx * len(data), len(train_loader.dataset),
                     100. * batch_idx / len(train_loader),
                     loss.item() / len(data)) 
-        print '====> Epoch: {} Average loss: {:.4f}'.format(epoch, train_loss / len(train_loader.dataset)), 
-        return train_loss / len(train_loader.dataset) 
+        print '====> Epoch: {} Average loss: {:.4f}'.format(epoch, train_loss / len(train_loader.dataset)),
     
         
     def test(self, test_loader, epoch):
         self.model.train()
         test_loss = 0 
         with torch.no_grad():
-            for i, data in enumerate(test_loader):
-                data = data.to(self.device, dtype=torch.float) 
+            for i, (data, _) in enumerate(test_loader):
+                data = data.to(self.device) 
                 recon_batch, mu, logvar = self.model(data)
                 test_loss += self.loss(recon_batch, data, mu, logvar).item()
 #                 if i == 0:
@@ -128,8 +125,7 @@ class conv_variational_autoencoder(object):
 #                              'results/reconstruction_' + str(epoch) + '.png', nrow=n)
 
         test_loss /= len(test_loader.dataset)
-        print('====> Test set loss: {:.4f}'.format(test_loss)) 
-        return test_loss
+        print('====> Test set loss: {:.4f}'.format(test_loss))
         
 
 class CVAE_model(nn.Module):
@@ -271,8 +267,7 @@ class CVAE_model(nn.Module):
         return mu, logvar 
     
     def reparameterize(self, mu, logvar): 
-        # eps * exp(-0.5 * logvar) + mu 
-        std = torch.exp(0.5*logvar)
+        std = torch.exp(logvar)
         eps = torch.randn_like(std)
         return eps.mul(std).add_(mu)
 
